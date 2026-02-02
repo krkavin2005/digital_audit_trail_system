@@ -1,0 +1,2 @@
+{"actor":"kavin","action":"LOGIN","target":"system","timeStamp":1770014710033,"prevHash":"0000000000000000000000000000000000000000000000000000000000000000","hash":"3ba749bb9fd7371b80a24ba17bd459c14d47931076e7b797dee0dc58c99b4c59"}
+{"actor":"jaivant","action":"CHANGE_ROLE","target":"kavin","timeStamp":1770014710043,"prevHash":"3ba749bb9fd7371b80a24ba17bd459c14d47931076e7b797dee0dc58c99b4c59","hash":"2e89eb9aaadda99210afc6dda6034f4a003455e0ee595f2e8bc85762d8f96637"}
