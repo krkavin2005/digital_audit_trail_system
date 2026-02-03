@@ -4,6 +4,11 @@ const { timeStamp } = require("console");
 
 const LOG_FILE = "events.log";
 
+function getAuditLogs(){
+    const data = fs.readFileSync(LOG_FILE,"utf-8");
+    return data.trim().split("\n").map(line => JSON.parse(line));
+}
+
 function computeHash(eventData , prevHash){
     const payload = JSON.stringify(eventData);
     return crypto.createHash("sha256").update(payload + prevHash).digest("hex");
@@ -33,5 +38,25 @@ function recordEvent(actor , action , target){
     console.log("Recorded:", event.hash);
 }
 
-recordEvent("kavin","LOGIN","system");
-recordEvent("jaivant","CHANGE_ROLE","kavin");
+function verifyAuditLog(events){
+    let prevHash = "0".repeat(64);
+    for(let i = 0 ; i < events.length; i ++){
+        const {hash , ...eventData} = events[i];
+        const recomputedHash = computeHash(eventData , prevHash);
+        if(recomputedHash !== hash){
+            return{
+                valid : false,
+                brokenAt : i,
+                expected : recomputedHash,
+                found : hash
+            };
+        }
+        prevHash = hash;
+    }
+    return {valid : true};
+}
+
+const events = getAuditLogs();
+console.log(verifyAuditLog(events));
+// recordEvent("irfahn","LOGIN","system");
+// recordEvent("malan","CHANGE_ROLE","irfahn");
