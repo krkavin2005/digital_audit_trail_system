@@ -1,0 +1,21 @@
+{
+  "name": "audit-trail",
+  "version": "1.0.0",
+  "description": "",
+  "main": "audit.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krkavin2005/digital_audit_trail_system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/krkavin2005/digital_audit_trail_system/issues"
+  },
+  "homepage": "https://github.com/krkavin2005/digital_audit_trail_system#readme"
+}
