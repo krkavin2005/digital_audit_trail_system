@@ -17,5 +17,8 @@
   "bugs": {
     "url": "https://github.com/krkavin2005/digital_audit_trail_system/issues"
   },
-  "homepage": "https://github.com/krkavin2005/digital_audit_trail_system#readme"
+  "homepage": "https://github.com/krkavin2005/digital_audit_trail_system#readme",
+  "dependencies": {
+    "pdfkit": "^0.17.2"
+  }
 }
