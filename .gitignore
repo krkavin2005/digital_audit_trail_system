@@ -1,0 +1,8 @@
+# Secrets
+private.pem
+
+# Runtime logs
+events.log
+
+# Node
+node_modules/
