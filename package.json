@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/krkavin2005/digital_audit_trail_system#readme",
   "dependencies": {
+    "mongoose": "^9.1.6",
     "pdfkit": "^0.17.2"
   }
 }

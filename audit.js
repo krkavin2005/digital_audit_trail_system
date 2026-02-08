@@ -3,6 +3,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { timeStamp } = require("console");
 const PDFDocument = require("pdfkit");
+const AuditEvent = require("./models/AuditEvent");
 const LOG_FILE = "events.log";
 const app = express();
 const privateKey = fs.readFileSync("private.pem","utf8");
@@ -15,33 +16,38 @@ function getAuditLogs(){
     return data.trim().split("\n").map(line => JSON.parse(line));
 }
 
+function canonicalStringify(obj){
+    return JSON.stringify(Object.keys(obj).sort().reduce((acc , key)=>{
+        acc[key] = obj[key];
+        return acc;
+    }))
+}
+
 function computeHash(eventData , prevHash){
-    const payload = JSON.stringify(eventData);
+    const payload = canonicalStringify(eventData);
     return crypto.createHash("sha256").update(payload + prevHash).digest("hex");
 }
 
-function getPreviousHash(){
-    try{
-        const lines = fs.readFileSync(LOG_FILE, "utf8").trim().split("\n");
-        const lastEvent = JSON.parse(lines[lines.length - 1]);
-        return lastEvent.hash;
-    }catch{
-        return "0".repeat(64);
-    }
+async function getPreviousHash(){
+    const lastEvent = await AuditEvent.findOne({}).sort({timestamp : -1}).lean();
+    return lastEvent ? lastEvent.hash : "0".repeat(64);
 }
 
-function recordEvent(actor , action , target){
-    const prevHash = getPreviousHash();
+async function recordEvent(actorId , actor , actorRole , action , target){
+    const prevHash = await getPreviousHash();
+    const eventId = (await AuditEvent.countDocuments())+ 1;
     const event = {
+        eventId,
+        actorId,
         actor,
+        actorRole,
         action,
         target,
-        timeStamp: Date.now(),
-        prevHash
+        timestamp: Date.now()
     };
-    event.hash = computeHash(event , prevHash);
-    fs.appendFileSync(LOG_FILE , JSON.stringify(event) + "\n");
-    console.log("Recorded:", event.hash);
+    const hash = computeHash(event , prevHash);
+    await AuditEvent.create({...event , prevHash , hash});
+    console.log("Recorded: ", hash);
 }
 
 function verifyAuditLog(events){
@@ -252,6 +258,10 @@ app.get("/keys/public/fingerprint",(req , res)=>{
 // console.log(verifyAuditLog(events));
 // recordEvent("irfahn","LOGIN","system");
 // recordEvent("malan","CHANGE_ROLE","irfahn");
+// recordEvent("u1", "Alice", "ADMIN", "SYSTEM_START", "audit_service").catch(console.error);
+// recordEvent("u2", "Bob", "AUDITOR", "DATA_ACCESS", "financial_records").catch(console.err);
+// recordEvent("u1", "Alice", "ADMIN", "REPORT_GENERATED", "audit_report").catch(console.error);
+
 
 app.listen(3000,() => {
     console.log("Audit System running on port 3000");
