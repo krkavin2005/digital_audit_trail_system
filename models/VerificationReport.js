@@ -1,0 +1,17 @@
+const mongoose = require("../db");
+
+const verificationReportSchema = new mongoose.Schema({
+    reportId : {type : String , required : true , unique : true},
+    verifiedAt : {type : Date , required : true},
+    totalRecords : {type : Number},
+    status : {type : String , enum :["VALID","TAMPERED"], required : true},
+    brokenAt : {type : Number},
+    expectedHash : {type : String},
+    foundHash : {type : String},
+    verifier : {type : String , default : "SYSTEM"},
+    fromEvent : {type : Number , required : true},
+    checkpointHash : {type : String},
+    signature: {type : String}
+},{versionKey : false});
+
+module.exports = mongoose.model("VerificationReport", verificationReportSchema);
