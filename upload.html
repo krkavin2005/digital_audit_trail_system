@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Upload Verification Report</title>
+</head>
+<body>
+
+  <h2>Upload Verification Report PDF</h2>
+
+  <form action="http://localhost:3000/verify/report/upload"
+        method="POST"
+        enctype="multipart/form-data">
+
+    <input type="file" name="file" required />
+    <br><br>
+
+    <button type="submit">Upload</button>
+  </form>
+
+</body>
+</html>

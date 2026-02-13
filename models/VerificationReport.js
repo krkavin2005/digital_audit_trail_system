@@ -9,8 +9,6 @@ const verificationReportSchema = new mongoose.Schema({
     expectedHash : {type : String},
     foundHash : {type : String},
     verifier : {type : String , default : "SYSTEM"},
-    fromEvent : {type : Number , required : true},
-    checkpointHash : {type : String},
     signature: {type : String}
 },{versionKey : false});
 
