@@ -9,6 +9,7 @@ const verificationReportSchema = new mongoose.Schema({
     expectedHash : {type : String},
     foundHash : {type : String},
     verifier : {type : String , default : "SYSTEM"},
+    renderedString : {type : String , required : true},
     signature: {type : String}
 },{versionKey : false});
 

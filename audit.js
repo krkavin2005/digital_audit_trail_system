@@ -110,7 +110,9 @@ async function generateVerificationReport(){
         report.foundHash = result.found;
     }
     const renderedReport = buildRenderedReport(report);
-    report.signature = signReport(renderedReport);
+    const normalized = normalize(renderedReport);
+    report.renderedString = normalized;
+    report.signature = signReport(normalized);
     await VerificationReport.create(report);
     return report;
 }
@@ -158,9 +160,7 @@ function generatePDFReport(report , signature , res){
 }
 
 function signReport(report){
-    const normalized = normalize(report);
-    console.log(normalized);
-    const hash = crypto.createHash("sha256").update(normalized).digest();
+    const hash = crypto.createHash("sha256").update(report).digest();
     const signature = crypto.sign("RSA-SHA256", hash , privateKey);
     return signature.toString("base64");
 }
@@ -219,6 +219,13 @@ function normalize(text){
     return text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n").map(line => line.trim()).filter(line => line.length > 0).join("\n").replace(/[ \t]+/g," ");
 }
 
+async function logAction(req , action , target){
+    const actorRole = req.headers["x-role"] || "UNKNOWN";
+    const actor = actorRole;
+    const actorId = actorRole;
+    await recordEvent(actorId , actor , actorRole , action , target);
+}
+
 app.get("/verify",requireRole(["AUDITOR"]),async(req,res)=>{
     try{
         const result = await verifyAuditLog();
@@ -226,6 +233,7 @@ app.get("/verify",requireRole(["AUDITOR"]),async(req,res)=>{
     }catch(err){
         res.status(500).json({err});
     }
+    await logAction(req , "AUDIT_VERIFICATION" , "audit_log_chain");
 });
 
 app.get("/logs", requireRole(["AUDITOR"]),async(req,res)=>{
@@ -258,25 +266,31 @@ app.get("/logs", requireRole(["AUDITOR"]),async(req,res)=>{
     }catch(err){
         res.status(500).json({err : err.message});
     }
+    await logAction(req , "LOGS_VIEWED","audit_logs");
 });
 
 app.get("/verify/report" , requireRole(["AUDITOR"]),async(req , res)=>{
+    let report;
     try{
-        const report = await generateVerificationReport();
+        report = await generateVerificationReport();
         res.json(report);
     }catch(err){
         res.status(500).json({err : err.message});
     }
+    await logAction(req , "REPORT_GENERATED" , report.reportId);
 });
 
-app.get("/verify/report/download",async (req,res)=>{
+app.get("/verify/report/:reportId/download",async (req,res)=>{
+    let report;
     try{
-        const report = await generateVerificationReport();
-        const renderedReport = buildRenderedReport(report);
-        generatePDFReport(renderedReport , report.signature , res);
+        const { reportId } = req.params;
+        report = await VerificationReport.findOne({reportId}).lean();
+        if(!report) return res.status(404).json({message : "Report not found"});
+        generatePDFReport(report.renderedString , report.signature , res);
     }catch(err){
         res.status(500).json({err : err.message});
     }
+    await logAction(req , "REPORT_DOWNLOADED" , report.reportId);
 });
 
 app.post("/verify/report/upload", upload.single("file"),async(req , res)=>{
@@ -302,27 +316,29 @@ app.post("/verify/report/upload", upload.single("file"),async(req , res)=>{
         const normalizedReport = normalize(report);
         const isValid = verifySignature(normalizedReport , signature);
         if(isValid){
-            return res.status(200).json({
+            res.status(200).json({
                 status : "VALID",
                 message : "Signature is valid. Report is authentic and unmodified"
             });
         }
-        return res.status(200).json({
+        else res.status(200).json({
             status : "INVALID",
             message : "Signature verification failed. Report may be tampered."
         });
+        await logAction(req , "REPORT_VALIDATED" , (isValid)? "VALID" : "INVALID");
     }catch(err){
         res.status(500).json({err : err.message});
     }
 });
 
-app.get("/keys/public/fingerprint",(req , res)=>{
+app.get("/keys/public/fingerprint",async (req , res)=>{
     try{
         const fingerprint = getPublicKeyFingerprint();
         res.json({fingerprint});
     }catch(err){
         res.status(500).json({err : err.message});
     }
+    await logAction(req ,"PUBLIC_KEY_ACCESSED","public_key");
 });
 
 // const events = getAuditLogs();
