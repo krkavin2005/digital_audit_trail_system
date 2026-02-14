@@ -12,7 +12,11 @@ const app = express();
 const privateKey = fs.readFileSync("private.pem","utf8");
 const publicKey = fs.readFileSync("public.pem","utf8");
 const upload = multer({storage : multer.memoryStorage()});
+require("./models/Role");
+require("./models/User");
+const PERMISSIONS = require("./config/permissions");
 
+console.log(PERMISSIONS);
 app.use(express.json());
 
 async function getAuditLogs(obj){
