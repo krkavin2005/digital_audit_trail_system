@@ -15,9 +15,13 @@ const upload = multer({storage : multer.memoryStorage()});
 require("./models/Role");
 require("./models/User");
 const PERMISSIONS = require("./config/permissions");
+const authMiddleware = require("./middleware/authMiddleware");
+const permissionMiddleware = require("./middleware/permissionMiddleware");
+require("dotenv").config();
 
-console.log(PERMISSIONS);
 app.use(express.json());
+app.use("/auth", require("./routes/auth"));
+app.use("/test", require("./routes/test"));
 
 async function getAuditLogs(obj){
     return await AuditEvent.find(obj).sort({eventId : 1}).lean();
@@ -230,7 +234,7 @@ async function logAction(req , action , target){
     await recordEvent(actorId , actor , actorRole , action , target);
 }
 
-app.get("/verify",requireRole(["AUDITOR"]),async(req,res)=>{
+app.get("/verify", authMiddleware , permissionMiddleware(PERMISSIONS.AUDIT_VIEW),async(req,res)=>{
     try{
         const result = await verifyAuditLog();
         res.status(200).json({result});
@@ -356,6 +360,6 @@ app.get("/keys/public/fingerprint",async (req , res)=>{
 // recordEvent("u2","Bob","AUDITOR","AUDIT_VERIFICATION","audit_log_chain").catch(console.error);
 // recordEvent("u1","Alice","ADMIN","ROLE_UPDATED","user:u3").catch(console.error);
 
-app.listen(3000,() => {
+app.listen(process.env.PORT,() => {
     console.log("Audit System running on port 3000");
 });

@@ -6,3 +6,6 @@ events.log
 
 # Node
 node_modules/
+
+# Env
+.env

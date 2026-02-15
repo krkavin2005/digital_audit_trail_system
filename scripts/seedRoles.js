@@ -12,7 +12,7 @@ async function seedRoles(){
         },
         {
             roleName : "MANAGER",
-            permissions :[PERMISSIONS.FILE_UPLOAD , PERMISSIONS.FILE_VIEW , PERMISSIONS.REPORT_GENERATE],
+            permissions :[PERMISSIONS.FILE_UPLOAD , PERMISSIONS.FILE_VIEW , PERMISSIONS.REPORT_GENERATE , PERMISSIONS.AUDIT_VIEW],
             description : "Manages files and reports"
         },
         {

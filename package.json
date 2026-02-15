@@ -19,6 +19,9 @@
   },
   "homepage": "https://github.com/krkavin2005/digital_audit_trail_system#readme",
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.3.1",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.6",
     "multer": "^2.0.2",
     "pdf-lib": "^1.17.1",

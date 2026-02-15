@@ -1,6 +1,7 @@
+require("dotenv").config();
 const mongoose = require("mongoose");
 
-mongoose.connect("mongodb://localhost:27017/digital_audit_trail")
+mongoose.connect(process.env.MONGO_URI)
 .then(()=> console.log("MongoDB connected"))
 .catch(err => console.log(err));
 
