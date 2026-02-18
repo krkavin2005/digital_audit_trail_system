@@ -7,12 +7,12 @@ async function seedRoles(){
     const roles = [
         {
             roleName : "ADMIN",
-            permissions : Object.values(PERMISSIONS),
-            description : "Full system access"
+            permissions : Object.values(PERMISSIONS).filter(perm => ![PERMISSIONS.REPORT_GENERATE , PERMISSIONS.VERIFY_AUDIT].includes(perm)),
+            description : "Almost Full system access"
         },
         {
             roleName : "MANAGER",
-            permissions :[PERMISSIONS.FILE_UPLOAD , PERMISSIONS.FILE_VIEW , PERMISSIONS.REPORT_GENERATE , PERMISSIONS.AUDIT_VIEW],
+            permissions :[PERMISSIONS.FILE_UPLOAD , PERMISSIONS.FILE_VIEW , PERMISSIONS.AUDIT_VIEW , PERMISSIONS.VERIFY_AUDIT , PERMISSIONS.USER_LIST],
             description : "Manages files and reports"
         },
         {
@@ -22,7 +22,7 @@ async function seedRoles(){
         },
         {
             roleName : "AUDITOR",
-            permissions :[PERMISSIONS.AUDIT_VIEW , PERMISSIONS.REPORT_GENERATE],
+            permissions :[PERMISSIONS.AUDIT_VIEW , PERMISSIONS.REPORT_GENERATE , PERMISSIONS.VERIFY_AUDIT , PERMISSIONS.REPORT_DOWNLOAD , PERMISSIONS.REPORT_VALIDATE],
             description : "Audit and compliance access"
         }
     ];

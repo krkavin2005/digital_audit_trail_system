@@ -1,7 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const crypto = require("crypto");
-const { timeStamp } = require("console");
+const { timeStamp, error } = require("console");
 const PDFDocument = require("pdfkit");
 const AuditEvent = require("./models/AuditEvent");
 const { randomUUID } = require("crypto");
@@ -12,16 +12,22 @@ const app = express();
 const privateKey = fs.readFileSync("private.pem","utf8");
 const publicKey = fs.readFileSync("public.pem","utf8");
 const upload = multer({storage : multer.memoryStorage()});
-require("./models/Role");
-require("./models/User");
+const Role = require("./models/Role");
+const User = require("./models/User");
 const PERMISSIONS = require("./config/permissions");
 const authMiddleware = require("./middleware/authMiddleware");
 const permissionMiddleware = require("./middleware/permissionMiddleware");
+const { report } = require("process");
 require("dotenv").config();
+const bcrypt = require("bcrypt");
+const cors = require("cors");
+const docupload = require("./config/multer");
+const Document = require("./models/Document")
 
 app.use(express.json());
 app.use("/auth", require("./routes/auth"));
 app.use("/test", require("./routes/test"));
+app.use(cors());
 
 async function getAuditLogs(obj){
     return await AuditEvent.find(obj).sort({eventId : 1}).lean();
@@ -228,13 +234,14 @@ function normalize(text){
 }
 
 async function logAction(req , action , target){
-    const actorRole = req.headers["x-role"] || "UNKNOWN";
-    const actor = actorRole;
-    const actorId = actorRole;
+    const {userId , username , role} = req.user;
+    const actorRole = role.roleName;
+    const actor = username;
+    const actorId = userId;
     await recordEvent(actorId , actor , actorRole , action , target);
 }
 
-app.get("/verify", authMiddleware , permissionMiddleware(PERMISSIONS.AUDIT_VIEW),async(req,res)=>{
+app.get("/verify", authMiddleware , permissionMiddleware(PERMISSIONS.VERIFY_AUDIT),async(req,res)=>{
     try{
         const result = await verifyAuditLog();
         res.status(200).json({result});
@@ -244,7 +251,7 @@ app.get("/verify", authMiddleware , permissionMiddleware(PERMISSIONS.AUDIT_VIEW)
     await logAction(req , "AUDIT_VERIFICATION" , "audit_log_chain");
 });
 
-app.get("/logs", requireRole(["AUDITOR"]),async(req,res)=>{
+app.get("/logs", authMiddleware , permissionMiddleware(PERMISSIONS.AUDIT_VIEW),async(req,res)=>{
     try{
         const filters = {};
         const {actor , action , from , to} = req.query;
@@ -255,7 +262,7 @@ app.get("/logs", requireRole(["AUDITOR"]),async(req,res)=>{
             filters.action = action;
         }
         if(from || to){
-            filters.timestamp = {};
+            filters.time = {};
             if(from){
                 filters.time.$gte = new Date(from);
             }
@@ -277,7 +284,7 @@ app.get("/logs", requireRole(["AUDITOR"]),async(req,res)=>{
     await logAction(req , "LOGS_VIEWED","audit_logs");
 });
 
-app.get("/verify/report" , requireRole(["AUDITOR"]),async(req , res)=>{
+app.get("/verify/report" , authMiddleware , permissionMiddleware(PERMISSIONS.REPORT_GENERATE),async(req , res)=>{
     let report;
     try{
         report = await generateVerificationReport();
@@ -288,7 +295,7 @@ app.get("/verify/report" , requireRole(["AUDITOR"]),async(req , res)=>{
     await logAction(req , "REPORT_GENERATED" , report.reportId);
 });
 
-app.get("/verify/report/:reportId/download",async (req,res)=>{
+app.get("/verify/report/:reportId/download", authMiddleware , permissionMiddleware(PERMISSIONS.REPORT_DOWNLOAD),async (req,res)=>{
     let report;
     try{
         const { reportId } = req.params;
@@ -301,7 +308,7 @@ app.get("/verify/report/:reportId/download",async (req,res)=>{
     await logAction(req , "REPORT_DOWNLOADED" , report.reportId);
 });
 
-app.post("/verify/report/upload", upload.single("file"),async(req , res)=>{
+app.post("/verify/report/upload", authMiddleware , permissionMiddleware(PERMISSIONS.REPORT_VALIDATE), upload.single("file"),async(req , res)=>{
     try {
         if(!req.file){
             return res.status(400).json({
@@ -347,6 +354,212 @@ app.get("/keys/public/fingerprint",async (req , res)=>{
         res.status(500).json({err : err.message});
     }
     await logAction(req ,"PUBLIC_KEY_ACCESSED","public_key");
+});
+
+app.get("/reports", authMiddleware , permissionMiddleware(PERMISSIONS.REPORT_DOWNLOAD),async(req , res)=>{
+    try{
+        const reports = await VerificationReport.find({}).sort({verifiedAt :-1});
+        res.json({
+            count : reports.length,
+            reports
+        });
+    }catch(err){
+        console.error(err);
+        res.status(500).json({error : err.message});
+    }
+});
+
+app.post("/users", authMiddleware , permissionMiddleware(PERMISSIONS.USER_CREATE), async(req , res)=>{
+    try{
+        const {email , password , roleName , username} = req.body;
+        if(!email || !password || !roleName ||!username){
+            return res.status(400).json({message : "Missing required fields"});
+        }
+        const exist = await User.findOne({email});
+        if(exist){
+            return res.status(409).json({message :"User already exists"});
+        }
+        const role = await Role.findOne({roleName : roleName.toUpperCase()});
+        if(!role){
+            return res.status(404).json({message :"Role not found"});
+        }
+        const passwordHash = await bcrypt.hash(password , 10);
+        const newUser = await User.create({
+            username,
+            email,
+            passwordHash,
+            role : role._id
+        });
+        await logAction(req ,"USER_CREATION","user");
+        res.status(201).json({
+            message :"User created",
+            userId : newUser.userId
+        });
+    }catch(err){
+        res.status(500).json({error : err.message});
+    }
+});
+
+app.patch("/users/:userId/role", authMiddleware , permissionMiddleware(PERMISSIONS.USER_PROMOTE), async(req , res)=>{
+    try{
+        const {userId} = req.params;
+        console.log(userId);
+        const {roleName}= req.body;
+        if(!roleName){
+            return res.status(400).json({message :"rolename is required"});
+        }
+        const targetUser = await User.findOne({userId});
+        if(!targetUser){
+            return res.status(404).json({message :"User not found"});
+        }
+        const newRole = await Role.findOne({roleName : roleName.toUpperCase()});
+        if(!newRole){
+            return res.status(400).json({message :"Role not found"});
+        }
+        if(req.user.userId === targetUser.userId){
+            return res.status(400).json({message :"Cannot modify your own role"});
+        }
+        targetUser.role = newRole._id;
+        await targetUser.save();
+        await logAction(req ,"USER_PROMOTION","user");
+        return res.status(200).json({
+            message :"User role updated successfully",
+            updateUserId : targetUser.userId,
+            newRole : newRole.roleName
+        });
+    }catch(err){
+        console.error(err);
+        return res.status(500).json({message :"Server error"});
+    }
+});
+
+app.patch("/users/:userId/deactivate", authMiddleware , permissionMiddleware(PERMISSIONS.USER_DELETE), async(req , res)=>{
+    try{
+        const {userId}= req.params;
+        const targetUser = await User.findOne({userId});
+        if(!targetUser){
+            return res.status(404).json({message : "User not found"});
+        }
+        if(req.user.userId === targetUser.userId){
+            return res.status(400).json({message :"Cannot deactivate own account"});
+        }
+        if(!targetUser.isActive){
+            return res.status(400).json({message :"User already deactivated"});
+        }
+        targetUser.isActive = false;
+        await targetUser.save();
+        await logAction(req , "USER_DEACTIVATION","user");
+        return res.json({
+            message :"User deactivated successfully",
+            userId : targetUser.userId
+        });
+    }catch(err){
+        console.error(err);
+        return res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/users", authMiddleware , permissionMiddleware(PERMISSIONS.USER_LIST), async(req , res)=>{
+    try{
+        const users = await User.find().populate("role").select("-passwordHash");
+        console.log(users);
+        const formatted = users.map(user => ({
+            userId : user.userId,
+            username : user .username,
+            email : user.email,
+            role : user.role.roleName,
+            isActive : user.isActive,
+            createdAt : user.createdAt
+        }));
+        await logAction(req ,"USER_LIST","user");
+        return res.json({
+            count : formatted.length,
+            users : formatted
+        });
+    }catch(err){
+        console.error(err);
+        return res.status(500).json({message : err.message});
+    }
+});
+
+app.patch("/users/:userId/reactivate",authMiddleware,permissionMiddleware(PERMISSIONS.USER_DELETE), async(req , res)=>{
+    try{
+        const{userId} = req.params;
+        const targetUser = await User.findOne({userId});
+        if(!targetUser){
+            return res.status(404).json({message :"User Not Found"});
+        }
+        if(targetUser.isActive){
+            return res.status(400).json({message :"User is already active"});
+        }
+        targetUser.isActive = true;
+        await targetUser.save();
+        await logAction(req ,"USER_REACTIVATION","user");
+        res.status(200).json({message :"User reactivated", userId : targetUser.userId});
+    }catch(err){
+        console.error(err);
+        return res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/users/:userId", authMiddleware , permissionMiddleware(PERMISSIONS.USER_LIST), async(req , res)=>{
+    try{
+        const {userId} = req.params;
+        const user = await User.findOne({userId}).populate("role").select("-passworHash");
+        if(!user) return res.status(404).json({message :"User not found"});
+        await logAction(req ,"USER_VIEW","user");
+        return res.json({
+            user:{
+                userId : user.userId,
+                username : user.username,
+                email : user.email,
+                role : user.role.roleName,
+                isActive : user.isActive,
+                createdAt : user.createdAt
+            }
+        });
+    }catch(err){
+        console.error(err);
+        return res.status(500).json({message : err.message});
+    }
+});
+
+app.post("/documents/upload", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_UPLOAD), docupload.single("file"), async(req , res)=>{
+    try{
+        if(!req.file){
+            return res.status(400).json({message :"No file uploaded"});
+        }
+        console.log(req.file);
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+        const newDoc = await Document.create({
+            orginalName : req.file.originalname,
+            storedName : req.file.filename,
+            uploadedBy : req.user._id,
+            fileHash,
+            size : req.file.size,
+            mimeType : req.file.mimetype
+        });
+        await logAction(req ,"FILE_UPLOAD", newDoc.documentId);
+        res.status(200).json({
+            message :"File uploaded",
+            document : newDoc
+        });
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/documents", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIEW), async(req , res)=>{
+    try{
+        const documents = await Document.find({isDeleted : false}).populate("uploadedBy","username email").select("-storedName -__v");
+        await logAction(req ,"FILE_LIST","Documents");
+        res.status(200).json({count : documents.length , documents});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
 });
 
 // const events = getAuditLogs();
