@@ -23,6 +23,7 @@ const bcrypt = require("bcrypt");
 const cors = require("cors");
 const docupload = require("./config/multer");
 const Document = require("./models/Document")
+const path = require("path");
 
 app.use(express.json());
 app.use("/auth", require("./routes/auth"));
@@ -262,14 +263,14 @@ app.get("/logs", authMiddleware , permissionMiddleware(PERMISSIONS.AUDIT_VIEW),a
             filters.action = action;
         }
         if(from || to){
-            filters.time = {};
+            filters.timestamp = {};
             if(from){
-                filters.time.$gte = new Date(from);
+                filters.timestamp.$gte = new Date(from);
             }
             if(to){
                 const toDate = new Date(to);
                 toDate.setDate(toDate.getDate()+ 1);
-                filters.time.$lte = toDate;
+                filters.timestamp.$lt = toDate;
             }
         }
         const events = await getAuditLogs(filters);
@@ -553,15 +554,77 @@ app.post("/documents/upload", authMiddleware , permissionMiddleware(PERMISSIONS.
 
 app.get("/documents", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIEW), async(req , res)=>{
     try{
-        const documents = await Document.find({isDeleted : false}).populate("uploadedBy","username email").select("-storedName -__v");
+        const {uploadedBy , mimeType , from , to , search , page = 1 , limit = 10}= req.query;
+        const filter ={isDeleted : false};
+        if(uploadedBy) filter.uploadedBy = uploadedBy;
+        if(mimeType) filter.mimeType = mimeType;
+        if(from || to){
+            filter.createdAt = {};
+            if(from) filter.createdAt.$gte = new Date(from);
+            if(to){
+                const toDate = new Date(to);
+                toDate.setDate(toDate.getDate()+ 1);
+                filter.createdAt.$lt = toDate;
+            }
+        }
+        if(search){
+            filter.originalName = {
+                $regex : search,
+                $options :"i"
+            };
+        }
+        const documents = await Document.find(filter).populate("uploadedBy","username email").sort({createdAt : -1}).skip((page -1)* limit).limit(Number(limit)).select("-storedName -__v");
+        const total = documents.length;
         await logAction(req ,"FILE_LIST","Documents");
-        res.status(200).json({count : documents.length , documents});
+        res.status(200).json({total : documents.length , page : Number(page), limit : Number(limit), documents});
     }catch(err){
         console.error(err);
         res.status(500).json({message : err.message});
     }
 });
 
+app.get("/documents/:documentId", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIEW), async(req , res)=>{
+    try{
+        const {documentId}= req.params;
+        const mode = req.query.mode || "download";
+        const document = await Document.findOne({documentId , isDeleted : false});
+        if(!document) return res.status(404).json({message :"Document not found"});
+        const filePath = path.join(__dirname ,"uploads",document.storedName);
+        if(!fs.existsSync(filePath)){
+            return res.status(404).json({message :"File not found"});
+        }
+        const fileBuffer = fs.readFileSync(filePath);
+        const computedHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+        if(computedHash !== document.fileHash){
+            return res.status(500).json({message:"File integrity check failed. File may have been tampered."});
+        }
+        await logAction(req ,"FILE_ACCESS", document.documentId);
+        if(mode === "view"){
+            res.setHeader("Content-type", document.mimeType);
+            res.setHeader("Contet-Disposition",`inline; filename="${document.originalName}"`);
+            return res.status(200).sendFile(filePath);
+        }
+        return res.status(200).download(filePath , document.originalName);
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.delete("/documents/:documentId", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_DELETE), async(req , res)=>{
+    try{
+        const {documentId}= req.params;
+        const document = await Document.findOne({documentId , isDeleted : false});
+        if(!document) res.status(400).json({message :"Document not found"});
+        document.isDeleted = true;
+        await document.save();
+        await logAction(req ,"FILE_DELETION", documentId);
+        res.status(200).json({message :"File deleted", documentId});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
 // const events = getAuditLogs();
 // console.log(verifyAuditLog(events));
 // recordEvent("irfahn","LOGIN","system");

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Document Viewer</title>
+</head>
+<body>
+
+  <h2>Document Test Page</h2>
+
+  <label>JWT Token:</label><br>
+  <input type="text" id="token" style="width:400px;"><br><br>
+
+  <label>Document ID:</label><br>
+  <input type="text" id="docId"><br><br>
+
+  <button onclick="viewDocument()">View Document</button>
+  <button onclick="downloadDocument()">Download Document</button>
+
+  <script>
+    const BASE_URL = "http://localhost:3000";
+
+    async function viewDocument() {
+      const token = document.getElementById("token").value;
+      const docId = document.getElementById("docId").value;
+
+      const response = await fetch(
+        `${BASE_URL}/documents/${docId}?mode=view`,
+        {
+          headers: {
+            Authorization: "Bearer " + token
+          }
+        }
+      );
+
+      if (!response.ok) {
+        alert("Error: " + response.status);
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      window.open(url);
+    }
+
+    async function downloadDocument() {
+      const token = document.getElementById("token").value;
+      const docId = document.getElementById("docId").value;
+
+      const response = await fetch(
+        `${BASE_URL}/documents/${docId}`,
+        {
+          headers: {
+            Authorization: "Bearer " + token
+          }
+        }
+      );
+
+      if (!response.ok) {
+        alert("Error: " + response.status);
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "downloaded-file";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  </script>
+
+</body>
+</html>
