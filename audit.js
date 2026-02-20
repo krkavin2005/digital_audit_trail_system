@@ -24,6 +24,8 @@ const cors = require("cors");
 const docupload = require("./config/multer");
 const Document = require("./models/Document")
 const path = require("path");
+const { canTransition, canDelete } = require("./workflow/documentWorkflow");
+const WorkflowHistory = require("./models/WorkflowHistory");
 
 app.use(express.json());
 app.use("/auth", require("./routes/auth"));
@@ -506,7 +508,7 @@ app.patch("/users/:userId/reactivate",authMiddleware,permissionMiddleware(PERMIS
 app.get("/users/:userId", authMiddleware , permissionMiddleware(PERMISSIONS.USER_LIST), async(req , res)=>{
     try{
         const {userId} = req.params;
-        const user = await User.findOne({userId}).populate("role").select("-passworHash");
+        const user = await User.findOne({userId}).populate("role").select("-passwordHash");
         if(!user) return res.status(404).json({message :"User not found"});
         await logAction(req ,"USER_VIEW","user");
         return res.json({
@@ -541,6 +543,13 @@ app.post("/documents/upload", authMiddleware , permissionMiddleware(PERMISSIONS.
             size : req.file.size,
             mimeType : req.file.mimetype
         });
+        await WorkflowHistory.create({
+            documentId : newDoc.documentId,
+            fromState : "initial",
+            toState : "draft",
+            actedBy : req.user._id,
+            actorRole : req.user.role.roleName
+        });
         await logAction(req ,"FILE_UPLOAD", newDoc.documentId);
         res.status(200).json({
             message :"File uploaded",
@@ -574,9 +583,9 @@ app.get("/documents", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIE
             };
         }
         const documents = await Document.find(filter).populate("uploadedBy","username email").sort({createdAt : -1}).skip((page -1)* limit).limit(Number(limit)).select("-storedName -__v");
-        const total = documents.length;
+        const total = await Document.countDocuments(filter);
         await logAction(req ,"FILE_LIST","Documents");
-        res.status(200).json({total : documents.length , page : Number(page), limit : Number(limit), documents});
+        res.status(200).json({total , page : Number(page), limit : Number(limit), documents});
     }catch(err){
         console.error(err);
         res.status(500).json({message : err.message});
@@ -601,7 +610,7 @@ app.get("/documents/:documentId", authMiddleware , permissionMiddleware(PERMISSI
         await logAction(req ,"FILE_ACCESS", document.documentId);
         if(mode === "view"){
             res.setHeader("Content-type", document.mimeType);
-            res.setHeader("Contet-Disposition",`inline; filename="${document.originalName}"`);
+            res.setHeader("Content-Disposition",`inline; filename="${document.originalName}"`);
             return res.status(200).sendFile(filePath);
         }
         return res.status(200).download(filePath , document.originalName);
@@ -615,11 +624,52 @@ app.delete("/documents/:documentId", authMiddleware , permissionMiddleware(PERMI
     try{
         const {documentId}= req.params;
         const document = await Document.findOne({documentId , isDeleted : false});
-        if(!document) res.status(400).json({message :"Document not found"});
+        if(!document) return res.status(400).json({message :"Document not found"});
+        if(!canDelete(document , req.user)){
+            return res.status(403).json({message :"Deletion not allowed in current state"});
+        }
         document.isDeleted = true;
         await document.save();
         await logAction(req ,"FILE_DELETION", documentId);
         res.status(200).json({message :"File deleted", documentId});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.patch("/documents/:documentId/transition", authMiddleware , async(req , res)=>{
+    try{
+        const {documentId}= req.params;
+        const {toState} = req.body;
+        const document = await Document.findOne({documentId ,isDeleted : false});
+        if(!document) return res.status(404).json({message :"Document not found"});
+        if(!canTransition(document , toState , req.user)){
+            return res.status(403).json({message :"Invalid state transition"});
+        }
+        const fromState = document.status;
+        document.status = toState;
+        await document.save();
+        await WorkflowHistory.create({
+            documentId,
+            fromState,
+            toState,
+            actedBy : req.user._id,
+            actorRole : req.user.role.roleName
+        })
+        await logAction(req ,`Document ${document.status}`,document.documentId);
+        res.status(200).json({message :"Status updated", status : document.status});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/documents/:documentId/history", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIEW), async(req , res)=>{
+    try{
+        const {documentId} = req.params;
+        const history = await WorkflowHistory.find({documentId}).populate("actedBy","username email").sort({createdAt : 1});
+        res.json({count : history.length , history});
     }catch(err){
         console.error(err);
         res.status(500).json({message : err.message});

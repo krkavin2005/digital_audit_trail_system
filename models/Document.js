@@ -9,7 +9,12 @@ const documentSchema = new mongoose.Schema({
     fileHash :{type : String , required : true},
     size :{type : Number , required : true},
     mimeType :{type : String , required : true},
-    isDeleted :{type : Boolean , default : false}
+    isDeleted :{type : Boolean , default : false},
+    status :{
+        type : String,
+        enum :["draft","submitted","approved","rejected","archived"],
+        default :"draft"
+    }
 },{timestamps : true});
 
 module.exports = mongoose.model("Document", documentSchema);
