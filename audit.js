@@ -545,8 +545,8 @@ app.post("/documents/upload", authMiddleware , permissionMiddleware(PERMISSIONS.
         });
         await WorkflowHistory.create({
             documentId : newDoc.documentId,
-            fromState : "initial",
-            toState : "draft",
+            fromState : "INITIAL",
+            toState : "DRAFT",
             actedBy : req.user._id,
             actorRole : req.user.role.roleName
         });
@@ -577,7 +577,7 @@ app.get("/documents", authMiddleware , permissionMiddleware(PERMISSIONS.FILE_VIE
             }
         }
         if(search){
-            filter.originalName = {
+            filter.orginalName = {
                 $regex : search,
                 $options :"i"
             };
@@ -610,10 +610,10 @@ app.get("/documents/:documentId", authMiddleware , permissionMiddleware(PERMISSI
         await logAction(req ,"FILE_ACCESS", document.documentId);
         if(mode === "view"){
             res.setHeader("Content-type", document.mimeType);
-            res.setHeader("Content-Disposition",`inline; filename="${document.originalName}"`);
+            res.setHeader("Content-Disposition",`inline; filename="${document.orginalName}"`);
             return res.status(200).sendFile(filePath);
         }
-        return res.status(200).download(filePath , document.originalName);
+        return res.status(200).download(filePath , document.orginalName);
     }catch(err){
         console.error(err);
         res.status(500).json({message : err.message});
@@ -644,11 +644,13 @@ app.patch("/documents/:documentId/transition", authMiddleware , async(req , res)
         const {toState} = req.body;
         const document = await Document.findOne({documentId ,isDeleted : false});
         if(!document) return res.status(404).json({message :"Document not found"});
-        if(!canTransition(document , toState , req.user)){
-            return res.status(403).json({message :"Invalid state transition"});
+        const result = canTransition(document , toState , req.user , req.body.comment);
+        if(!result.allowed){
+            return res.status(403).json({message : result.reason});
         }
         const fromState = document.status;
         document.status = toState;
+        document.statusChangedAt = new Date();
         await document.save();
         await WorkflowHistory.create({
             documentId,
@@ -670,6 +672,61 @@ app.get("/documents/:documentId/history", authMiddleware , permissionMiddleware(
         const {documentId} = req.params;
         const history = await WorkflowHistory.find({documentId}).populate("actedBy","username email").sort({createdAt : 1});
         res.json({count : history.length , history});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/workflow/pending", authMiddleware , async(req , res)=>{
+    try{
+        const role = req.user.role.roleName;
+        const userId = req.user._id;
+        let query ={};
+        if(role ==="MANAGER"){
+            query.status ="SUBMITTED";
+        }
+        if(role ==="ADMIN"){
+            query.status ={$in :["SUBMITTED","APPROVED"]};
+        }
+        if(role ==="EMPLOYEE"){
+            query.status ={$in :["REJECTED","DRAFT"]};
+            query.uploadedBy = userId;
+        }
+        const docs = await Document.find(query).populate("uploadedBy","username email -_id").select("documentId orginalName status uploadedBy createdAt").sort({createdAt :-1});
+        res.status(200).json({count : docs.length , documents : docs});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/workflow/my-submissions", authMiddleware , async(req , res)=>{
+    try{
+        const docs = await Document.find({uploadedBy : req.user._id}).select("documentId orginalName status createdAt").sort({createdAt :-1});
+        res.status(200).json({count : docs.length , documents : docs});
+    }catch(err){
+        console.error(err);
+        res.status(500).json({message : err.message});
+    }
+});
+
+app.get("/workflow/dashboard-summary", authMiddleware , async(req , res)=>{
+    try{
+        const summary = await Document.aggregate([
+            {$match :{isDeleted : false}},
+            {$group :{_id :"$status", count :{$sum :1}}}
+        ]);
+        const counts ={
+            DRAFT : 0,
+            SUBMITTED : 0,
+            APPROVED : 0,
+            REJECTED : 0,
+            ARCHIVED : 0
+        };
+        summary.forEach(el => counts[el._id]= el.count);
+        const total = summary.reduce((acc , el)=> acc + el.count , 0);
+        res.status(200).json({total , counts});
     }catch(err){
         console.error(err);
         res.status(500).json({message : err.message});

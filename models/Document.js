@@ -12,8 +12,13 @@ const documentSchema = new mongoose.Schema({
     isDeleted :{type : Boolean , default : false},
     status :{
         type : String,
-        enum :["draft","submitted","approved","rejected","archived"],
+        enum :["DRAFT","SUBMITTED","APPROVED","REJECTED","ARCHIVED"],
         default :"draft"
+    },
+    statusChangetAt :{
+        type : Date,
+        required : true,
+        default : Date.now
     }
 },{timestamps : true});
 
