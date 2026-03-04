@@ -3,7 +3,7 @@ const {randomUUID}= require("crypto");
 
 const documentSchema = new mongoose.Schema({
     documentId :{type : String , default : randomUUID , unique : true , index : true},
-    orginalName :{type : String , required : true},
+    originalName :{type : String , required : true},
     storedName :{type : String , required : true},
     uploadedBy :{type : mongoose.Schema.Types.ObjectId , ref :"User", required : true},
     fileHash :{type : String , required : true},
@@ -15,11 +15,13 @@ const documentSchema = new mongoose.Schema({
         enum :["DRAFT","SUBMITTED","APPROVED","REJECTED","ARCHIVED"],
         default :"draft"
     },
-    statusChangetAt :{
+    statusChangedAt :{
         type : Date,
         required : true,
         default : Date.now
-    }
+    },
+    isEscalated :{type : Boolean , default : false},
+    escalatedAt :{type : Date}
 },{timestamps : true});
 
 module.exports = mongoose.model("Document", documentSchema);

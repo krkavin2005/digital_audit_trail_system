@@ -26,6 +26,13 @@ const TRANSITIONS ={
     }
 };
 
+const SLA_RULES ={
+    SUBMITTED : 1,
+    APPROVED : 7
+};
+
+const ESCALATION_BUFFER_DAYS = 2;
+
 const TERMINALS =[STATES.ARCHIVED];
 
 function canDelete(document , user){
@@ -57,4 +64,21 @@ function canTransition(document , nextState , user , comment = null){
     return {allowed : true};
 }
 
-module.exports ={STATES , canTransition , canDelete};
+function isOverdue(doc){
+    if(!SLA_RULES[doc.status]) return false;
+    const now = new Date();
+    const diffms = now - doc.statusChangedAt;
+    const diffDays = diffms /(1000 * 60 * 60 * 24);
+    return diffDays > SLA_RULES[doc.status];
+}
+
+function shouldEscalate(doc){
+    console.log(doc.status);
+    if(!SLA_RULES[doc.status]) return false;
+    if(doc.isEscalated) return false;
+    const now = new Date();
+    const diffDays = (now - doc.statusChangedAt)/(1000 * 60 * 60 * 24);
+    return diffDays > SLA_RULES[doc.status]+ ESCALATION_BUFFER_DAYS;
+}
+
+module.exports ={STATES , canTransition , canDelete , isOverdue , shouldEscalate};
