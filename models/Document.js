@@ -13,7 +13,7 @@ const documentSchema = new mongoose.Schema({
     status :{
         type : String,
         enum :["DRAFT","SUBMITTED","APPROVED","REJECTED","ARCHIVED"],
-        default :"draft"
+        default :"DRAFT"
     },
     statusChangedAt :{
         type : Date,
@@ -21,7 +21,8 @@ const documentSchema = new mongoose.Schema({
         default : Date.now
     },
     isEscalated :{type : Boolean , default : false},
-    escalatedAt :{type : Date}
+    escalatedAt :{type : Date},
+    assignedTo :{type : mongoose.Schema.Types.ObjectId , ref :"User"}
 },{timestamps : true});
 
 module.exports = mongoose.model("Document", documentSchema);

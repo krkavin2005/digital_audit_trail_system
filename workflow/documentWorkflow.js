@@ -53,8 +53,11 @@ function canTransition(document , nextState , user , comment = null){
     if(currentState === STATES.SUBMITTED && (nextState === STATES.APPROVED || nextState === STATES.REJECTED)&& document.uploadedBy.equals(user._id)){
         return {allowed : false , reason :"Cannot approve own doc"};
     }
+    if(currentState === STATES.SUBMITTED && !document.assignedTo.equals(user._id)){
+        return {allowed : false , reason :"Not assigned to you"};
+    }
     if(currentState === STATES.DRAFT && nextState === STATES.SUBMITTED && !document.uploadedBy.equals(user._id)) {
-        return {alloed : false , reason :"Not the owner of the file"};
+        return {allowed : false , reason :"Not the owner of the file"};
     }
     if(currentState === STATES.REJECTED && nextState === STATES.DRAFT){
         if(!document.uploadedBy.equals(user._id)){

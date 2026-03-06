@@ -28,6 +28,8 @@ const { canTransition, canDelete, isOverdue, shouldEscalate } = require("./workf
 const WorkflowHistory = require("./models/WorkflowHistory");
 const cron = require("node-cron");
 const { default: mongoose } = require("mongoose");
+const Notification = require("./models/Notification");
+const updateAuditAnchor = require("./utils/updateAuditAnchor");
 
 let systemUser;
 
@@ -59,7 +61,8 @@ async function getPreviousHash() {
 
 async function recordEvent(actorId, actor, actorRole, action, target) {
     const prevHash = await getPreviousHash();
-    const eventId = (await AuditEvent.countDocuments()) + 1;
+    const last = await AuditEvent.findOne({}).sort({eventId : -1});
+    const eventId = last ? last.eventId + 1 : 1;  
     const event = {
         eventId,
         actorId,
@@ -72,24 +75,50 @@ async function recordEvent(actorId, actor, actorRole, action, target) {
     const hash = computeHash(event, prevHash);
     await AuditEvent.create({ ...event, prevHash, hash });
     console.log("Recorded: ", hash);
+    updateAuditAnchor(hash, eventId);
 }
 
 async function verifyAuditLog() {
+    const anchor = JSON.parse(fs.readFileSync("audit-anchor.json", "utf8"));
     const events = await AuditEvent.find({}).sort({ eventId: 1 }).lean();
+    const lastEvent = events[events.length - 1];
+    if (anchor.lastHash !== lastEvent.hash) {
+        return {
+            valid: false,
+            brokenAt: events.length - 1,
+            expectedHash: anchor.lastHash,
+            found: lastEvent.hash,
+            expectedCount: anchor.eventCount,
+            presentCount: events.length,
+            tamperCode: 2
+        };
+    }
     if (events.length === 0) {
         return { valid: true, message: "No audit events found" };
     }
+    let storedPrevHash = "0".repeat(64);
     for (let i = 0; i < events.length; i++) {
         const { _id, hash, prevHash, ...eventData } = events[i];
+        if (storedPrevHash !== prevHash) {
+            return {
+                valid: false,
+                brokenAt: i,
+                expectedPrevHash: storedPrevHash,
+                foundPrevHash: prevHash,
+                tamperCode: 0
+            }
+        }
         const recomputedHash = computeHash(eventData, prevHash);
         if (recomputedHash !== hash) {
             return {
                 valid: false,
                 brokenAt: i,
                 expected: recomputedHash,
-                found: hash
+                found: hash,
+                tamperCode: 1
             };
         }
+        storedPrevHash = hash;
     }
     return { valid: true };
 }
@@ -127,8 +156,19 @@ async function generateVerificationReport() {
     else {
         report.status = "TAMPERED";
         report.brokenAt = result.brokenAt;
-        report.expectedHash = result.expected;
-        report.foundHash = result.found;
+        if (!result.tamperCode) {
+            report.expectedPrevHash = result.expectedPrevHash;
+            report.foundPrevHash = result.foundPrevHash;
+        }
+        else{
+            report.expectedHash = result.expected;
+            report.foundHash = result.found;
+            if(result.tamperCode == 2){
+                report.expectedCount = result.expectedCount;
+                report.presentCount = result.presentCount;
+            }
+        }
+        report.tamperCode = result.tamperCode;
     }
     const renderedReport = buildRenderedReport(report);
     const normalized = normalize(renderedReport);
@@ -207,8 +247,19 @@ function buildRenderedReport(report) {
         lines.push("Audit trail integrity violation detected.");
         lines.push("");
         lines.push(`Broken At Index : ${report.brokenAt}`);
-        lines.push(`Expected Hash : ${report.expectedHash}`);
-        lines.push(`Found Hash : ${report.foundHash}`);
+        if (report.tamperCode) {
+            lines.push(`Expected Hash : ${report.expectedHash}`);
+            lines.push(`Found Hash : ${report.foundHash}`);
+            if(report.tamperCode == 2){
+                lines.push(`Expected Count : ${report.expectedCount}`);
+                lines.push(`Present Count : ${report.presentCount}`);
+                lines.push(`Log truncation detected.`);
+            }
+        }
+        else {
+            lines.push(`Expected Previous Hash : ${report.expectedPrevHash}`);
+            lines.push(`Found Previous Hash : ${report.foundPrevHash}`);
+        }
     }
     else {
         lines.push("Audit trail integration verified successfully.");
@@ -240,7 +291,7 @@ function normalize(text) {
     return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map(line => line.trim()).filter(line => line.length > 0).join("\n").replace(/[ \t]+/g, " ");
 }
 
-async function logAction(user , action, target) {
+async function logAction(user, action, target) {
     const { userId, username, role } = user;
     const actorRole = role.roleName;
     const actor = username;
@@ -249,10 +300,10 @@ async function logAction(user , action, target) {
 }
 
 async function runEscalation(actor) {
-    const documents = await Document.find({ isDeleted: false, isEscalated: false });
+    const documents = await Document.find({ isDeleted: false, isEscalated: false , status : {$in :["SUBMITTED ","APPROVED"]}});
     let escalatedCount = 0;
-    const adminRole = await Role.find({roleName :"ADMIN"});
-    const admins = await User.find({role : adminRole._id});
+    const adminRole = await Role.findOne({ roleName: "ADMIN" });
+    const admins = await User.find({ role: adminRole._id });
     for (const doc of documents) {
         if (shouldEscalate(doc)) {
             doc.isEscalated = true;
@@ -266,15 +317,15 @@ async function runEscalation(actor) {
                 actorRole: actor.role.roleName,
                 comment: "Auto escalation due to SLA breach"
             });
-            await logAction(actor ,"DOCUMENT_ESCALATED", doc.documentId);
+            await logAction(actor, "DOCUMENT_ESCALATED", doc.documentId);
             const recepients = new Map();
             admins.forEach(admin => recepients.set(admin._id.toString(), admin._id));
             recepients.set(doc.uploadedBy.toString(), doc.uploadedBy);
-            await Notification.insertMany(Array.from(recepirnts.values()).map(userId =>({
+            await Notification.insertMany(Array.from(recepients.values()).map(userId => ({
                 userId,
-                type :"ESCALATION",
-                doucumentId : doc.documentId,
-                message : `Document "${doc.originalName}" has been escalated due to SLA breach`
+                type: "ESCALATION",
+                documentId: doc.documentId,
+                message: `Document "${doc.originalName}" has been escalated due to SLA breach`
             })));
             escalatedCount++;
         }
@@ -306,7 +357,7 @@ app.get("/verify", authMiddleware, permissionMiddleware(PERMISSIONS.VERIFY_AUDIT
     } catch (err) {
         res.status(500).json({ err });
     }
-    await logAction(req.user , "AUDIT_VERIFICATION", "audit_log_chain");
+    await logAction(req.user, "AUDIT_VERIFICATION", "audit_log_chain");
 });
 
 app.get("/logs", authMiddleware, permissionMiddleware(PERMISSIONS.AUDIT_VIEW), async (req, res) => {
@@ -339,7 +390,7 @@ app.get("/logs", authMiddleware, permissionMiddleware(PERMISSIONS.AUDIT_VIEW), a
     } catch (err) {
         res.status(500).json({ err: err.message });
     }
-    await logAction(req.user , "LOGS_VIEWED", "audit_logs");
+    await logAction(req.user, "LOGS_VIEWED", "audit_logs");
 });
 
 app.get("/verify/report", authMiddleware, permissionMiddleware(PERMISSIONS.REPORT_GENERATE), async (req, res) => {
@@ -350,7 +401,7 @@ app.get("/verify/report", authMiddleware, permissionMiddleware(PERMISSIONS.REPOR
     } catch (err) {
         res.status(500).json({ err: err.message });
     }
-    await logAction(req.user , "REPORT_GENERATED", report.reportId);
+    await logAction(req.user, "REPORT_GENERATED", report.reportId);
 });
 
 app.get("/verify/report/:reportId/download", authMiddleware, permissionMiddleware(PERMISSIONS.REPORT_DOWNLOAD), async (req, res) => {
@@ -363,7 +414,7 @@ app.get("/verify/report/:reportId/download", authMiddleware, permissionMiddlewar
     } catch (err) {
         res.status(500).json({ err: err.message });
     }
-    await logAction(req.user , "REPORT_DOWNLOADED", report.reportId);
+    await logAction(req.user, "REPORT_DOWNLOADED", report.reportId);
 });
 
 app.post("/verify/report/upload", authMiddleware, permissionMiddleware(PERMISSIONS.REPORT_VALIDATE), upload.single("file"), async (req, res) => {
@@ -411,7 +462,7 @@ app.get("/keys/public/fingerprint", async (req, res) => {
     } catch (err) {
         res.status(500).json({ err: err.message });
     }
-    await logAction(req.user , "PUBLIC_KEY_ACCESSED", "public_key");
+    await logAction(req.user, "PUBLIC_KEY_ACCESSED", "public_key");
 });
 
 app.get("/reports", authMiddleware, permissionMiddleware(PERMISSIONS.REPORT_DOWNLOAD), async (req, res) => {
@@ -448,7 +499,7 @@ app.post("/users", authMiddleware, permissionMiddleware(PERMISSIONS.USER_CREATE)
             passwordHash,
             role: role._id
         });
-        await logAction(req.user , "USER_CREATION", "user");
+        await logAction(req.user, "USER_CREATION", "user");
         res.status(201).json({
             message: "User created",
             userId: newUser.userId
@@ -479,7 +530,7 @@ app.patch("/users/:userId/role", authMiddleware, permissionMiddleware(PERMISSION
         }
         targetUser.role = newRole._id;
         await targetUser.save();
-        await logAction(req.user , "USER_PROMOTION", "user");
+        await logAction(req.user, "USER_PROMOTION", "user");
         return res.status(200).json({
             message: "User role updated successfully",
             updateUserId: targetUser.userId,
@@ -506,7 +557,7 @@ app.patch("/users/:userId/deactivate", authMiddleware, permissionMiddleware(PERM
         }
         targetUser.isActive = false;
         await targetUser.save();
-        await logAction(req.user , "USER_DEACTIVATION", "user");
+        await logAction(req.user, "USER_DEACTIVATION", "user");
         return res.json({
             message: "User deactivated successfully",
             userId: targetUser.userId
@@ -529,7 +580,7 @@ app.get("/users", authMiddleware, permissionMiddleware(PERMISSIONS.USER_LIST), a
             isActive: user.isActive,
             createdAt: user.createdAt
         }));
-        await logAction(req.user , "USER_LIST", "user");
+        await logAction(req.user, "USER_LIST", "user");
         return res.json({
             count: formatted.length,
             users: formatted
@@ -552,7 +603,7 @@ app.patch("/users/:userId/reactivate", authMiddleware, permissionMiddleware(PERM
         }
         targetUser.isActive = true;
         await targetUser.save();
-        await logAction(req.user , "USER_REACTIVATION", "user");
+        await logAction(req.user, "USER_REACTIVATION", "user");
         res.status(200).json({ message: "User reactivated", userId: targetUser.userId });
     } catch (err) {
         console.error(err);
@@ -565,7 +616,7 @@ app.get("/users/:userId", authMiddleware, permissionMiddleware(PERMISSIONS.USER_
         const { userId } = req.params;
         const user = await User.findOne({ userId }).populate("role").select("-passwordHash");
         if (!user) return res.status(404).json({ message: "User not found" });
-        await logAction(req.user , "USER_VIEW", "user");
+        await logAction(req.user, "USER_VIEW", "user");
         return res.json({
             user: {
                 userId: user.userId,
@@ -605,7 +656,7 @@ app.post("/documents/upload", authMiddleware, permissionMiddleware(PERMISSIONS.F
             actedBy: req.user._id,
             actorRole: req.user.role.roleName
         });
-        await logAction(req.user , "FILE_UPLOAD", newDoc.documentId);
+        await logAction(req.user, "FILE_UPLOAD", newDoc.documentId);
         res.status(200).json({
             message: "File uploaded",
             document: newDoc
@@ -639,7 +690,7 @@ app.get("/documents", authMiddleware, permissionMiddleware(PERMISSIONS.FILE_VIEW
         }
         const documents = await Document.find(filter).populate("uploadedBy", "username email").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).select("-storedName -__v");
         const total = await Document.countDocuments(filter);
-        await logAction(req.user , "FILE_LIST", "Documents");
+        await logAction(req.user, "FILE_LIST", "Documents");
         res.status(200).json({ total, page: Number(page), limit: Number(limit), documents });
     } catch (err) {
         console.error(err);
@@ -662,7 +713,7 @@ app.get("/documents/:documentId", authMiddleware, permissionMiddleware(PERMISSIO
         if (computedHash !== document.fileHash) {
             return res.status(500).json({ message: "File integrity check failed. File may have been tampered." });
         }
-        await logAction(req.user , "FILE_ACCESS", document.documentId);
+        await logAction(req.user, "FILE_ACCESS", document.documentId);
         if (mode === "view") {
             res.setHeader("Content-type", document.mimeType);
             res.setHeader("Content-Disposition", `inline; filename="${document.originalName}"`);
@@ -685,7 +736,7 @@ app.delete("/documents/:documentId", authMiddleware, permissionMiddleware(PERMIS
         }
         document.isDeleted = true;
         await document.save();
-        await logAction(req.user , "FILE_DELETION", documentId);
+        await logAction(req.user, "FILE_DELETION", documentId);
         res.status(200).json({ message: "File deleted", documentId });
     } catch (err) {
         console.error(err);
@@ -696,25 +747,46 @@ app.delete("/documents/:documentId", authMiddleware, permissionMiddleware(PERMIS
 app.patch("/documents/:documentId/transition", authMiddleware, async (req, res) => {
     try {
         const { documentId } = req.params;
-        const { toState } = req.body;
-        const document = await Document.findOne({ documentId, isDeleted: false });
+        const { toState, managerId } = req.body;
+        const document = await Document.findOne({ documentId, isDeleted: false }).populate("uploadedBy","username");
         if (!document) return res.status(404).json({ message: "Document not found" });
         const result = canTransition(document, toState, req.user, req.body.comment);
         if (!result.allowed) {
             return res.status(403).json({ message: result.reason });
         }
+        if (toState === "SUBMITTED") {
+            if (!managerId) return res.status(400).json({ message: "Reviewer required" });
+            document.assignedTo = managerId;
+            await Notification.insertOne({
+                userId : managerId,
+                type :"SUBMISSION",
+                documentId,
+                message :`Document ${document.originalName} submitted by ${document.uploadedBy.username} for approval.`
+            });
+        }
+        if (toState === "DRAFT") document.assignedTo = null;
+        if(toState ==="APPROVED"|| toState ==="REJECTED" || toState ==="ARCHIVED"){
+            await Notification.insertOne({
+                userId : document.uploadedBy._id,
+                type : "ACTION",
+                documentId,
+                message :`Document ${document.originalName} ${toState.toLowerCase()}` 
+            });
+        }
         const fromState = document.status;
         document.status = toState;
         document.statusChangedAt = new Date();
         await document.save();
+        console.log(req.body);
         await WorkflowHistory.create({
             documentId,
             fromState,
             toState,
             actedBy: req.user._id,
-            actorRole: req.user.role.roleName
+            actorRole: req.user.role.roleName,
+            comment: req.body.comment || null
         })
-        await logAction(req.user , `Document ${document.status}`, document.documentId);
+        await logAction(req.user, `Document ${document.status}`, document.documentId);
         res.status(200).json({ message: "Status updated", status: document.status });
     } catch (err) {
         console.error(err);
@@ -740,9 +812,10 @@ app.get("/workflow/pending", authMiddleware, async (req, res) => {
         let query = {};
         if (role === "MANAGER") {
             query.status = "SUBMITTED";
+            query.assignedTo = userId;
         }
         else if (role === "ADMIN") {
-            query.status = { $in: ["APPROVED", "SUBMITTED"] };
+            query.$or = [{ status: "APPROVED" }, { status: "SUBMITTED", assignedTo: userId }];
         }
         else if (role === "EMPLOYEE") {
             query.status = { $in: ["REJECTED", "DRAFT"] };
@@ -799,7 +872,7 @@ app.get("/workflow/dashboard-summary", authMiddleware, async (req, res) => {
 app.post("/workflow/run-escalation", authMiddleware, async (req, res) => {
     try {
         const count = await runEscalation(req.user);
-        await logAction(req.user , "ESCALATION_RUN_MANUAL", "workflow");
+        await logAction(req.user, "ESCALATION_RUN_MANUAL", "workflow");
         res.status(200).json({
             message: "Escalation run completed",
             escalated: count
@@ -810,13 +883,33 @@ app.post("/workflow/run-escalation", authMiddleware, async (req, res) => {
     }
 });
 
-app.get("/notifications", authMiddleware , async(req , res)=>{
-    try{
-    const notifications = await Notification.find({userId : req.user._id}).sort({createdAt : -1});
-    res.status(200).json(notifications);
-    }catch(err){
+app.get("/notifications", authMiddleware, async (req, res) => {
+    try {
+        const notifications = await Notification.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.status(200).json(notifications);
+    } catch (err) {
         console.error(err);
-        res.status(500).json({message : err.message});
+        res.status(500).json({ message: err.message });
+    }
+});
+
+app.get("/notifications/unread-count", authMiddleware, async (req, res) => {
+    try {
+        const count = await Notification.countDocuments({ userId: req.user._id, isRead: false });
+        res.status(200).json({ unread: count });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+app.patch("/notifications/:id/read", authMiddleware, async (req, res) => {
+    try {
+        await Notification.updateOne({ _id: req.params.id, userId: req.user._id }, { $set: { isRead: true } });
+        res.status(200).json({ message: "Marked as read" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: err.message });
     }
 });
 // const events = getAuditLogs();
