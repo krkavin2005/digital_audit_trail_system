@@ -1,0 +1,161 @@
+const {randomUUID}= require("crypto");
+const AuditEvent = require("../models/AuditEvent");
+const VerificationReport = require("../models/VerificationReport");
+const PDFDocument = require("pdfkit");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const crypto = require("crypto");
+const { verifyAuditLog } = require("./auditService");
+const fs = require("fs");
+const privateKey = fs.readFileSync("private.pem", "utf8");
+const publicKey = fs.readFileSync("public.pem", "utf8");
+
+async function generateVerificationReport() {
+    const result = await verifyAuditLog();
+    const report = {
+        reportId: randomUUID(),
+        verifiedAt: new Date().toISOString(),
+        totalRecords: await AuditEvent.countDocuments(),
+        verifier: "SYSTEM"
+    };
+    if (result.valid) {
+        report.status = "VALID";
+    }
+    else {
+        report.status = "TAMPERED";
+        report.brokenAt = result.brokenAt;
+        if (!result.tamperCode) {
+            report.expectedPrevHash = result.expectedPrevHash;
+            report.foundPrevHash = result.foundPrevHash;
+        }
+        else{
+            report.expectedHash = result.expected;
+            report.foundHash = result.found;
+            if(result.tamperCode == 2){
+                report.expectedCount = result.expectedCount;
+                report.presentCount = result.presentCount;
+            }
+        }
+        report.tamperCode = result.tamperCode;
+    }
+    const renderedReport = buildRenderedReport(report);
+    const normalized = normalize(renderedReport);
+    report.renderedString = normalized;
+    report.signature = signReport(normalized);
+    await VerificationReport.create(report);
+    return report;
+}
+
+function generatePDFReport(report, signature, res) {
+    try {
+        const time = report.match(/Verification Time\s*:\s*(.+)/);
+        if (!time) throw new Error("Verification Time not found");
+        const verifiedAt = time[1].trim();
+        const doc = new PDFDocument({ margin: 50 });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="audit_report_${verifiedAt.replace(/:/g, "_")}.pdf"`);
+        doc.pipe(res);
+        const lines = report.split("\n");
+        doc.fontSize(18).text(lines[0], { align: "center" });
+        doc.moveDown(2);
+        doc.fontSize(12);
+        for (let line of lines.slice(1)) {
+            if (line.startsWith("Status : ")) {
+                const statusvalue = line.replace("Status : ", "");
+                doc.text("Status : ", { continued: true });
+                if (statusvalue === "VALID") {
+                    doc.fillColor("green").text("VALID");
+                }
+                else {
+                    doc.fillColor("red").text("TAMPERED");
+                }
+                doc.moveDown(1);
+            }
+            else if (line.startsWith("This")) {
+                doc.moveDown(2);
+                doc.fillColor("black").text(line);
+            }
+            else doc.text(line);
+        };
+        doc.moveDown(2);
+        doc.fillColor("white").fontSize(6);
+        doc.text("BEGIN-----")
+        doc.text(signature, { width: 500 });
+        doc.text("-----END");
+        doc.end();
+    } catch (err) {
+        res.status(500).json({ err: err.message });
+    }
+}
+
+function signReport(report) {
+    const hash = crypto.createHash("sha256").update(report).digest();
+    const signature = crypto.sign("RSA-SHA256", hash, privateKey);
+    return signature.toString("base64");
+}
+
+function verifySignature(report, signature) {
+    const hash = crypto.createHash("sha256").update(report).digest();
+    return crypto.verify("RSA-SHA256", hash, publicKey, Buffer.from(signature, "base64"));
+}
+
+function buildRenderedReport(report) {
+    let lines = [];
+    lines.push("AUDIT TRAIL VERIFICATION REPORT");
+    lines.push("");
+    lines.push(`Verification Time : ${report.verifiedAt}`);
+    lines.push(`Total Records Checked : ${report.totalRecords}`);
+    lines.push(`Status : ${report.status}`);
+    lines.push("");
+    if (report.status === "TAMPERED") {
+        lines.push("Audit trail integrity violation detected.");
+        lines.push("");
+        lines.push(`Broken At Index : ${report.brokenAt}`);
+        if (report.tamperCode) {
+            lines.push(`Expected Hash : ${report.expectedHash}`);
+            lines.push(`Found Hash : ${report.foundHash}`);
+            if(report.tamperCode == 2){
+                lines.push(`Expected Count : ${report.expectedCount}`);
+                lines.push(`Present Count : ${report.presentCount}`);
+                lines.push(`Log truncation detected.`);
+            }
+        }
+        else {
+            lines.push(`Expected Previous Hash : ${report.expectedPrevHash}`);
+            lines.push(`Found Previous Hash : ${report.foundPrevHash}`);
+        }
+    }
+    else {
+        lines.push("Audit trail integration verified successfully.");
+    }
+    lines.push("");
+    lines.push("This report was generated by the Audit Trail System");
+    return lines.join("\n");
+}
+
+async function extractText(buffer) {
+    const uint8array = new Uint8Array(buffer);
+    const loadingTask = pdfjsLib.getDocument({ data: uint8array });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const textContent = await page.getTextContent();
+    const lines = {};
+    textContent.items.forEach(item => {
+        const y = Math.round(item.transform[5] / 5) * 5;
+        if (!lines[y]) {
+            lines[y] = [];
+        }
+        lines[y].push(item.str);
+    });
+    const sortedLines = Object.keys(lines).sort((a, b) => b - a).map(y => lines[y].join(" "));
+    return sortedLines.join("\n");
+}
+
+function normalize(text) {
+    return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map(line => line.trim()).filter(line => line.length > 0).join("\n").replace(/[ \t]+/g, " ");
+}
+
+function getPublicKeyFingerprint() {
+    return crypto.createHash("sha256").update(publicKey).digest("hex");
+}
+
+module.exports ={generateVerificationReport , generatePDFReport , signReport , verifySignature , normalize , extractText , getPublicKeyFingerprint};
