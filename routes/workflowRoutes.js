@@ -1,87 +1,14 @@
 const express = require("express");
 const authMiddleware = require("../middleware/authMiddleware");
-const Document = require("../models/Document");
-const { runEscalation } = require("../services/escalationService");
-const { logAction } = require("../services/auditService");
-const { isOverdue } = require("../workflow/documentWorkflow");
+const { getPendingWorks, getMySubmissions, getDashboardSummary, runEscalationManual } = require("../controllers/workflowController");
 const router = express.Router();
 
-router.get("/pending", authMiddleware , async (req, res) => {
-    try {
-        const role = req.user.role.roleName;
-        const userId = req.user._id;
-        let query = {};
-        if (role === "MANAGER") {
-            query.status = "SUBMITTED";
-            query.assignedTo = userId;
-        }
-        else if (role === "ADMIN") {
-            query.$or = [{ status: "APPROVED" }, { status: "SUBMITTED", assignedTo: userId }];
-        }
-        else if (role === "EMPLOYEE") {
-            query.status = { $in: ["REJECTED", "DRAFT"] };
-            query.uploadedBy = userId;
-        }
-        const docs = await Document.find(query).populate("uploadedBy", "username email -_id").select("documentId originalName status uploadedBy createdAt statusChangedAt isEscalated").sort({ createdAt: -1 });
-        const updated = docs.map(doc => ({
-            ...doc.toObject(),
-            isOverdue: isOverdue(doc)
-        }));
-        res.status(200).json({ count: updated.length, documents: updated });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
-});
+router.get("/pending", authMiddleware , getPendingWorks);
 
-router.get("/my-submissions", authMiddleware, async (req, res) => {
-    try {
-        const docs = await Document.find({ uploadedBy: req.user._id }).select("documentId originalName status createdAt").sort({ createdAt: -1 });
-        res.status(200).json({ count: docs.length, documents: docs });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
-});
+router.get("/my-submissions", authMiddleware, getMySubmissions);
 
-router.get("/dashboard-summary", authMiddleware, async (req, res) => {
-    try {
-        const summary = await Document.find({ isDeleted: false });
-        const counts = {
-            DRAFT: 0,
-            SUBMITTED: 0,
-            APPROVED: 0,
-            REJECTED: 0,
-            ARCHIVED: 0,
-            OVERDUE: 0,
-            ESCALATED: 0
-        };
-        summary.forEach(doc => {
-            const status = doc.status;
-            if (counts[status] !== undefined) counts[status]++;
-            if (isOverdue(doc)) counts.OVERDUE++;
-            if (doc.isEscalated) counts.ESCALATED++;
-        });
-        const total = summary.length;
-        res.status(200).json({ total, counts });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
-});
+router.get("/dashboard-summary", authMiddleware, getDashboardSummary);
 
-router.post("/run-escalation", authMiddleware, async (req, res) => {
-    try {
-        const count = await runEscalation(req.user);
-        await logAction(req.user, "ESCALATION_RUN_MANUAL", "workflow");
-        res.status(200).json({
-            message: "Escalation run completed",
-            escalated: count
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
-});
+router.post("/run-escalation", authMiddleware, runEscalationManual);
 
 module.exports = router;
