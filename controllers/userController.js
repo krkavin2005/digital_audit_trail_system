@@ -39,12 +39,15 @@ exports.listUsers = async (req, res) => {
         const users = await User.find().populate("role").select("-passwordHash");
         console.log(users);
         const formatted = users.map(user => ({
+            _id: user._id,
             userId: user.userId,
             username: user.username,
             email: user.email,
             role: user.role.roleName,
             isActive: user.isActive,
-            createdAt: user.createdAt
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            lastLogin: user.lastLogin
         }));
         await logAction(req.user, "USER_LIST", "user");
         return res.json({

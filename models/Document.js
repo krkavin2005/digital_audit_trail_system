@@ -21,6 +21,8 @@ const documentSchema = new mongoose.Schema({
         default : Date.now
     },
     isEscalated :{type : Boolean , default : false},
+    isOverdue :{type : Boolean , default : false},
+    isEscalated :{type : Boolean , default : false},
     escalatedAt :{type : Date},
     assignedTo :{type : mongoose.Schema.Types.ObjectId , ref :"User"}
 },{timestamps : true});

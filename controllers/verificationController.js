@@ -1,4 +1,5 @@
 const VerificationReport = require("../models/VerificationReport");
+const { logAction } = require("../services/auditService");
 const { generateVerificationReport, generatePDFReport, extractText, normalize, verifySignature, getPublicKeyFingerprint } = require("../services/reportService");
 
 exports.verifyLogs = async (req, res) => {

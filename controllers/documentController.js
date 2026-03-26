@@ -43,7 +43,7 @@ exports.uploadDocument = async (req, res) => {
 
 exports.listDocuments = async (req, res) => {
     try {
-        const { uploadedBy, mimeType, from, to, search, page = 1, limit = 10 } = req.query;
+        const { uploadedBy, mimeType, from, to, search, page = 1, limit = 10 , status} = req.query;
         const filter = { isDeleted: false };
         if (uploadedBy) filter.uploadedBy = uploadedBy;
         if (mimeType) filter.mimeType = mimeType;
@@ -62,9 +62,14 @@ exports.listDocuments = async (req, res) => {
                 $options: "i"
             };
         }
-        const documents = await Document.find(filter).populate("uploadedBy", "username email").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).select("-storedName -__v");
+        if (status) {
+            if(status ==="OVERDUE") filter.isOverdue = true;
+            else if(status ==="ESCALATED") filter.isEscalated = true;
+            else filter.status = status;
+        }
+        const documents = await Document.find(filter).populate("uploadedBy", "username email").populate("assignedTo","username email").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).select("-storedName -__v");
         const total = await Document.countDocuments(filter);
-        await logAction(req.user, "FILE_LIST", "Documents");
+        // await logAction(req.user, "FILE_LIST", "Documents");
         res.status(200).json({ total, page: Number(page), limit: Number(limit), documents });
     } catch (err) {
         console.error(err);
@@ -131,6 +136,8 @@ exports.transitionDocument = async (req, res) => {
         if (toState === "SUBMITTED") {
             if (!managerId) return res.status(400).json({ message: "Reviewer required" });
             document.assignedTo = managerId;
+            console.log(managerId);
+            
             await Notification.insertOne({
                 userId: managerId,
                 type: "SUBMISSION",

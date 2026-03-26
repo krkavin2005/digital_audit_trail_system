@@ -22,6 +22,7 @@ exports.getUnreadCount = async (req, res) => {
 
 exports.markAsRead = async (req, res) => {
     try {
+        console.log(req.params.id);
         await Notification.updateOne({ _id: req.params.id, userId: req.user._id }, { $set: { isRead: true } });
         res.status(200).json({ message: "Marked as read" });
     } catch (err) {

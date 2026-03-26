@@ -6,6 +6,7 @@ const { isOverdue } = require("../workflow/documentWorkflow");
 exports.getPendingWorks = async (req, res) => {
     try {
         const role = req.user.role.roleName;
+        if(role ==="AUDITOR") return res.json({documents : []});
         const userId = req.user._id;
         let query = {};
         if (role === "MANAGER") {
@@ -33,7 +34,7 @@ exports.getPendingWorks = async (req, res) => {
 
 exports.getMySubmissions = async (req, res) => {
     try {
-        const docs = await Document.find({ uploadedBy: req.user._id }).select("documentId originalName status createdAt").sort({ createdAt: -1 });
+        const docs = await Document.find({ uploadedBy: req.user._id }).populate("uploadedBy", "username email -_id").select("documentId originalName status uploadedBy createdAt statusChangedAt isEscalated").sort({ createdAt: -1 });
         res.status(200).json({ count: docs.length, documents: docs });
     } catch (err) {
         console.error(err);
@@ -53,12 +54,17 @@ exports.getDashboardSummary = async (req, res) => {
             OVERDUE: 0,
             ESCALATED: 0
         };
-        summary.forEach(doc => {
+        summary.forEach(async (doc) => {
             const status = doc.status;
             if (counts[status] !== undefined) counts[status]++;
-            if (isOverdue(doc)) counts.OVERDUE++;
+            if (isOverdue(doc)) {
+                doc.isOverdue = true;
+                counts.OVERDUE++;
+            }
             if (doc.isEscalated) counts.ESCALATED++;
+            await doc.save();
         });
+
         const total = summary.length;
         res.status(200).json({ total, counts });
     } catch (err) {
