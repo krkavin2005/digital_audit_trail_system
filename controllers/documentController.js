@@ -6,6 +6,8 @@ const { logAction } = require("../services/auditService");
 const path = require("path");
 const { canTransition, canDelete } = require("../workflow/documentWorkflow");
 const Notification = require("../models/Notification");
+const { log } = require("console");
+const User = require("../models/User");
 
 exports.uploadDocument = async (req, res) => {
     try {
@@ -43,9 +45,11 @@ exports.uploadDocument = async (req, res) => {
 
 exports.listDocuments = async (req, res) => {
     try {
-        const { uploadedBy, mimeType, from, to, search, page = 1, limit = 10 , status} = req.query;
+        const { uploadedBy, mimeType, from, to, search, page = 1, limit = 10 , status} = req.query;        
         const filter = { isDeleted: false };
-        if (uploadedBy) filter.uploadedBy = uploadedBy;
+        if (uploadedBy) {
+            filter.uploadedBy = await User.find({username : {$regex : uploadedBy , $options :"i"}}).select("_id");
+        }
         if (mimeType) filter.mimeType = mimeType;
         if (from || to) {
             filter.createdAt = {};
@@ -126,10 +130,10 @@ exports.deleteDocument = async (req, res) => {
 exports.transitionDocument = async (req, res) => {
     try {
         const { documentId } = req.params;
-        const { toState, managerId } = req.body;
+        const { toState, managerId , comment} = req.body;
         const document = await Document.findOne({ documentId, isDeleted: false }).populate("uploadedBy", "username");
         if (!document) return res.status(404).json({ message: "Document not found" });
-        const result = canTransition(document, toState, req.user, req.body.comment);
+        const result = canTransition(document, toState, req.user, comment);
         if (!result.allowed) {
             return res.status(403).json({ message: result.reason });
         }
