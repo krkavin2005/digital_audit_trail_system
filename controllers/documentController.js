@@ -161,6 +161,9 @@ exports.transitionDocument = async (req, res) => {
         const fromState = document.status;
         document.status = toState;
         document.statusChangedAt = new Date();
+        document.isOverdue = false;
+        document.isEscalated = false;
+        document.escalatedAt = null
         await document.save();
         console.log(req.body);
         await WorkflowHistory.create({

@@ -27,7 +27,7 @@ const TRANSITIONS ={
 };
 
 const SLA_RULES ={
-    SUBMITTED : 1,
+    SUBMITTED : 3,
     APPROVED : 7
 };
 
