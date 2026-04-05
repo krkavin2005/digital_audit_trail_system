@@ -53,6 +53,7 @@ function generatePDFReport(report, signature, res) {
         const doc = new PDFDocument({ margin: 50 });
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="audit_report_${verifiedAt.replace(/:/g, "_")}.pdf"`);
+        res.setHeader("Access-Control-Expose-Headers","Content-Disposition");
         doc.pipe(res);
         const lines = report.split("\n");
         doc.fontSize(18).text(lines[0], { align: "center" });

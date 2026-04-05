@@ -38,6 +38,8 @@ exports.downloadReport = async (req, res) => {
 
 exports.uploadReport = async (req, res) => {
     try {
+        console.log("hi");
+        
         if (!req.file) {
             return res.status(400).json({
                 status: "INVALID REQUEST",
@@ -48,8 +50,8 @@ exports.uploadReport = async (req, res) => {
         const text = await extractText(buffer);
         const signatureMatch = text.match(/BEGIN([\s\S]*?)END/);
         if (!signatureMatch) {
-            return res.status(400).json({
-                status: "INVALID_REQUEST",
+            return res.status(200).json({
+                status: "INVALID",
                 message: "Signature Matching failed . Report may have been tampered with."
             });
         }
