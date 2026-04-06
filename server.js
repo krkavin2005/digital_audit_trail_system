@@ -7,7 +7,10 @@ const { runEscalation, startCronJobs } = require("./services/escalationService")
 const { initSystemUser, getSystemUser } = require("./services/systemService");
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+    origin :"*",
+    credentials : true
+}));
 app.use("/auth", require("./routes/auth"));
 app.use("/test", require("./routes/test"));
 app.use("/users", require("./routes/userRoutes"));
