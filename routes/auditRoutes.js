@@ -6,5 +6,6 @@ const { getLogs } = require("../controllers/auditController");
 const router = express.Router();
 
 router.get("/logs", authMiddleware, permissionMiddleware(PERMISSIONS.AUDIT_VIEW), getLogs);
+router.get("/my-logs", authMiddleware, getLogs);
 
 module.exports = router;

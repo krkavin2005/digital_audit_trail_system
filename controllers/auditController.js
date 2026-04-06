@@ -3,9 +3,9 @@ const { getAuditLogs, logAction } = require("../services/auditService");
 exports.getLogs = async (req, res) => {
     try {
         const filters = {};
-        const { actor, action, from, to } = req.query;
-        if (actor) {
-            filters.actor = actor;
+        const { actorId , action, from, to } = req.query;
+        if (actorId) {
+            filters.actorId = actorId;
         }
         if (action) {
             filters.action = action;
@@ -29,6 +29,7 @@ exports.getLogs = async (req, res) => {
             logs: cleaned
         });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ err: err.message });
     }
 };
