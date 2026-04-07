@@ -43,7 +43,7 @@ exports.listUsers = async (req, res) => {
             userId: user.userId,
             username: user.username,
             email: user.email,
-            role: user.role.roleName,
+            role: user.role?.roleName || "UNKNOWN",
             isActive: user.isActive,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt,
@@ -71,7 +71,7 @@ exports.getUser = async (req, res) => {
                 userId: user.userId,
                 username: user.username,
                 email: user.email,
-                role: user.role.roleName,
+                role: user.role?.roleName || "UNKNOWN",
                 isActive: user.isActive,
                 createdAt: user.createdAt
             }

@@ -78,7 +78,7 @@ async function getAuditLogs(obj) {
 
 async function logAction(user, action, target) {
     const { userId, username, role } = user;
-    const actorRole = role.roleName;
+    const actorRole = role?.roleName || "UNKNOWN";
     const actor = username;
     const actorId = userId;
     await recordEvent(actorId, actor, actorRole, action, target);
