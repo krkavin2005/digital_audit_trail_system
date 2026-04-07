@@ -8,8 +8,8 @@ const { initSystemUser, getSystemUser } = require("./services/systemService");
 
 app.use(express.json());
 app.use(cors({
-    origin :"*",
-    credentials : true
+    origin: ['http://localhost:5173', 'https://audit-trail-frontend-bay.vercel.app'],
+    credentials: true
 }));
 app.use("/auth", require("./routes/auth"));
 app.use("/test", require("./routes/test"));
