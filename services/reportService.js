@@ -1,4 +1,4 @@
-const {randomUUID}= require("crypto");
+const { randomUUID } = require("crypto");
 const AuditEvent = require("../models/AuditEvent");
 const VerificationReport = require("../models/VerificationReport");
 const PDFDocument = require("pdfkit");
@@ -6,8 +6,8 @@ const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const crypto = require("crypto");
 const { verifyAuditLog } = require("./auditService");
 const fs = require("fs");
-const privateKey = fs.readFileSync("private.pem", "utf8");
-const publicKey = fs.readFileSync("public.pem", "utf8");
+const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, "\n");
+const publicKey = process.env.PUBLIC_KEY.replace(/\\n/g, "\n");
 
 async function generateVerificationReport() {
     const result = await verifyAuditLog();
@@ -27,10 +27,10 @@ async function generateVerificationReport() {
             report.expectedPrevHash = result.expectedPrevHash;
             report.foundPrevHash = result.foundPrevHash;
         }
-        else{
+        else {
             report.expectedHash = result.expected;
             report.foundHash = result.found;
-            if(result.tamperCode == 2){
+            if (result.tamperCode == 2) {
                 report.expectedCount = result.expectedCount;
                 report.presentCount = result.presentCount;
             }
@@ -53,7 +53,7 @@ function generatePDFReport(report, signature, res) {
         const doc = new PDFDocument({ margin: 50 });
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="audit_report_${verifiedAt.replace(/:/g, "_")}.pdf"`);
-        res.setHeader("Access-Control-Expose-Headers","Content-Disposition");
+        res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
         doc.pipe(res);
         const lines = report.split("\n");
         doc.fontSize(18).text(lines[0], { align: "center" });
@@ -114,7 +114,7 @@ function buildRenderedReport(report) {
         if (report.tamperCode) {
             lines.push(`Expected Hash : ${report.expectedHash}`);
             lines.push(`Found Hash : ${report.foundHash}`);
-            if(report.tamperCode == 2){
+            if (report.tamperCode == 2) {
                 lines.push(`Expected Count : ${report.expectedCount}`);
                 lines.push(`Present Count : ${report.presentCount}`);
                 lines.push(`Log truncation detected.`);
@@ -159,4 +159,4 @@ function getPublicKeyFingerprint() {
     return crypto.createHash("sha256").update(publicKey).digest("hex");
 }
 
-module.exports ={generateVerificationReport , generatePDFReport , signReport , verifySignature , normalize , extractText , getPublicKeyFingerprint};
+module.exports = { generateVerificationReport, generatePDFReport, signReport, verifySignature, normalize, extractText, getPublicKeyFingerprint };
