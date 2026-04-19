@@ -19,6 +19,7 @@ exports.generateReport = async (req, res) => {
         await logAction(req.user, "REPORT_GENERATED", report.reportId);
         res.json(report);
     } catch (err) {
+        console.log(err);
         res.status(500).json({ err: err.message });
     }
 };
@@ -30,7 +31,7 @@ exports.downloadReport = async (req, res) => {
         report = await VerificationReport.findOne({ reportId }).lean();
         if (!report) return res.status(404).json({ message: "Report not found" });
         await logAction(req.user, "REPORT_DOWNLOADED", report.reportId);
-        generatePDFReport (report.renderedString, report.signature, res);
+        generatePDFReport(report.renderedString, report.signature, res);
     } catch (err) {
         res.status(500).json({ err: err.message });
     }
@@ -39,7 +40,7 @@ exports.downloadReport = async (req, res) => {
 exports.uploadReport = async (req, res) => {
     try {
         console.log("hi");
-        
+
         if (!req.file) {
             return res.status(400).json({
                 status: "INVALID REQUEST",

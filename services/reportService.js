@@ -1,3 +1,4 @@
+require("dotenv").config({ path: require('path').resolve(__dirname, '../.env') });
 const { randomUUID } = require("crypto");
 const AuditEvent = require("../models/AuditEvent");
 const VerificationReport = require("../models/VerificationReport");
@@ -6,8 +7,9 @@ const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const crypto = require("crypto");
 const { verifyAuditLog } = require("./auditService");
 const fs = require("fs");
-const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, "\n");
+const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, "\n");//at render
 const publicKey = process.env.PUBLIC_KEY.replace(/\\n/g, "\n");
+console.log(privateKey);
 
 async function generateVerificationReport() {
     const result = await verifyAuditLog();
